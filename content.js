@@ -2,6 +2,43 @@ let isPanelVisible = false;
 let isPickerActive = false;
 let hoveredElement = null;
 let searchTimeout = null;
+let autocompleteIndex = -1;
+
+// XPath autocomplete suggestions
+const xpathSuggestions = {
+  axes: [
+    { label: 'ancestor::', description: 'Selects all ancestors of the current node' },
+    { label: 'ancestor-or-self::', description: 'Selects current node and all ancestors' },
+    { label: 'attribute::', description: 'Selects all attributes of the current node' },
+    { label: 'child::', description: 'Selects all children of the current node' },
+    { label: 'descendant::', description: 'Selects all descendants of the current node' },
+    { label: 'descendant-or-self::', description: 'Selects current node and all descendants' },
+    { label: 'following::', description: 'Selects everything after the closing tag' },
+    { label: 'following-sibling::', description: 'Selects all siblings after the current node' },
+    { label: 'namespace::', description: 'Selects all namespace nodes' },
+    { label: 'parent::', description: 'Selects the parent of the current node' },
+    { label: 'preceding::', description: 'Selects all nodes before the current node' },
+    { label: 'preceding-sibling::', description: 'Selects all siblings before the current node' },
+    { label: 'self::', description: 'Selects the current node' }
+  ],
+  functions: [
+    { label: 'contains()', description: 'Returns true if string contains substring' },
+    { label: 'starts-with()', description: 'Returns true if string starts with substring' },
+    { label: 'ends-with()', description: 'Returns true if string ends with substring' },
+    { label: 'text()', description: 'Selects all text nodes' },
+    { label: 'normalize-space()', description: 'Removes leading/trailing whitespace' },
+    { label: 'concat()', description: 'Concatenates strings' },
+    { label: 'substring()', description: 'Returns substring from string' },
+    { label: 'string-length()', description: 'Returns length of string' },
+    { label: 'translate()', description: 'Translates characters in string' },
+    { label: 'count()', description: 'Returns count of nodes' },
+    { label: 'position()', description: 'Returns position of current node' },
+    { label: 'last()', description: 'Returns position of last node' },
+    { label: 'not()', description: 'Returns true if condition is false' },
+    { label: 'name()', description: 'Returns name of current node' },
+    { label: 'local-name()', description: 'Returns local name of current node' }
+  ]
+};
 
 // Create the side panel
 function createPanel() {
@@ -30,14 +67,19 @@ function createPanel() {
     <div class="xpath-panel-content">
       <div class="xpath-input-section">
         <label class="xpath-label">XPath Query:</label>
-        <textarea 
-          id="xpath-input" 
-          class="xpath-textarea" 
-          placeholder="Type XPath... e.g., //div[@class='example']"
-          rows="3"
-        ></textarea>
+        <div class="xpath-input-container">
+          <textarea 
+            id="xpath-input" 
+            class="xpath-textarea" 
+            placeholder="Type XPath... e.g., //div[@class='example']"
+            rows="3"
+            autocomplete="off"
+            spellcheck="false"
+          ></textarea>
+          <div id="xpath-autocomplete" class="xpath-autocomplete"></div>
+        </div>
         <div class="xpath-help-text">
-          💡 Auto-search as you type
+          💡 Auto-search as you type | Tab/Enter to complete
         </div>
       </div>
 
@@ -94,6 +136,9 @@ function attachPanelEvents() {
   xpathInput.addEventListener("input", (e) => {
     clearTimeout(searchTimeout);
     const xpath = e.target.value.trim();
+    
+    // Show autocomplete
+    showAutocomplete(e.target);
 
     if (!xpath) {
       clearResults();
@@ -104,6 +149,43 @@ function attachPanelEvents() {
     searchTimeout = setTimeout(() => {
       evaluateXPath(xpath);
     }, 500);
+  });
+
+  // Handle keyboard navigation for autocomplete
+  xpathInput.addEventListener("keydown", (e) => {
+    const autocompleteDiv = document.getElementById("xpath-autocomplete");
+    const items = autocompleteDiv.querySelectorAll(".xpath-autocomplete-item");
+    
+    if (items.length === 0) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      autocompleteIndex = Math.min(autocompleteIndex + 1, items.length - 1);
+      updateAutocompleteSelection(items);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      autocompleteIndex = Math.max(autocompleteIndex - 1, 0);
+      updateAutocompleteSelection(items);
+    } else if (e.key === "Enter" && autocompleteIndex >= 0) {
+      e.preventDefault();
+      items[autocompleteIndex].click();
+    } else if (e.key === "Tab") {
+      // Tab always uses selected suggestion (first by default)
+      if (items.length > 0) {
+        e.preventDefault();
+        items[autocompleteIndex].click();
+      }
+    } else if (e.key === "Escape" && items.length > 0) {
+      e.stopPropagation();
+      hideAutocomplete();
+    }
+  });
+
+  // Hide autocomplete when clicking outside
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".xpath-input-container")) {
+      hideAutocomplete();
+    }
   });
 
   // Make panel draggable
@@ -188,6 +270,122 @@ function makePanelDraggable() {
     // Re-enable transition
     panel.style.transition = "";
   }
+}
+
+// Autocomplete functions
+function showAutocomplete(textarea) {
+  const autocompleteDiv = document.getElementById("xpath-autocomplete");
+  if (!autocompleteDiv) return;
+
+  const value = textarea.value;
+  const cursorPos = textarea.selectionStart;
+  const textBeforeCursor = value.substring(0, cursorPos);
+  
+  // Find the last word before cursor
+  const lastWord = textBeforeCursor.match(/[\w:-]*$/)?.[0] || "";
+  
+  if (lastWord.length < 1) {
+    hideAutocomplete();
+    return;
+  }
+
+  // Get suggestions
+  const suggestions = getSuggestions(lastWord);
+  
+  if (suggestions.length === 0) {
+    hideAutocomplete();
+    return;
+  }
+
+  // Build autocomplete HTML
+  let html = "";
+  suggestions.forEach((suggestion, index) => {
+    html += `
+      <div class="xpath-autocomplete-item" data-value="${escapeHtml(suggestion.label)}" data-index="${index}">
+        <div class="xpath-autocomplete-label">${escapeHtml(suggestion.label)}</div>
+        <div class="xpath-autocomplete-desc">${escapeHtml(suggestion.description)}</div>
+      </div>
+    `;
+  });
+
+  autocompleteDiv.innerHTML = html;
+  autocompleteDiv.style.display = "block";
+  
+  // Auto-select first item (like IDE behavior)
+  autocompleteIndex = 0;
+
+  // Attach click handlers
+  const items = autocompleteDiv.querySelectorAll(".xpath-autocomplete-item");
+  items.forEach((item) => {
+    item.addEventListener("click", () => {
+      insertSuggestion(textarea, item.getAttribute("data-value"));
+    });
+  });
+  
+  // Highlight first item
+  updateAutocompleteSelection(items);
+}
+
+function hideAutocomplete() {
+  const autocompleteDiv = document.getElementById("xpath-autocomplete");
+  if (autocompleteDiv) {
+    autocompleteDiv.style.display = "none";
+    autocompleteDiv.innerHTML = "";
+  }
+  autocompleteIndex = -1;
+}
+
+function getSuggestions(prefix) {
+  const suggestions = [];
+  const lowerPrefix = prefix.toLowerCase();
+
+  // Search in axes
+  xpathSuggestions.axes.forEach((item) => {
+    if (item.label.toLowerCase().startsWith(lowerPrefix)) {
+      suggestions.push(item);
+    }
+  });
+
+  // Search in functions
+  xpathSuggestions.functions.forEach((item) => {
+    if (item.label.toLowerCase().startsWith(lowerPrefix)) {
+      suggestions.push(item);
+    }
+  });
+
+  return suggestions.slice(0, 10); // Limit to 10 suggestions
+}
+
+function updateAutocompleteSelection(items) {
+  items.forEach((item, index) => {
+    if (index === autocompleteIndex) {
+      item.classList.add("selected");
+      item.scrollIntoView({ block: "nearest" });
+    } else {
+      item.classList.remove("selected");
+    }
+  });
+}
+
+function insertSuggestion(textarea, value) {
+  const cursorPos = textarea.selectionStart;
+  const textBefore = textarea.value.substring(0, cursorPos);
+  const textAfter = textarea.value.substring(cursorPos);
+  
+  // Replace the last word with the suggestion
+  const textBeforeWithoutLastWord = textBefore.replace(/[\w:-]*$/, "");
+  const newValue = textBeforeWithoutLastWord + value + textAfter;
+  const newCursorPos = textBeforeWithoutLastWord.length + value.length;
+  
+  textarea.value = newValue;
+  textarea.setSelectionRange(newCursorPos, newCursorPos);
+  textarea.focus();
+  
+  hideAutocomplete();
+  
+  // Trigger input event to update search
+  const event = new Event("input", { bubbles: true });
+  textarea.dispatchEvent(event);
 }
 
 function showPanel() {

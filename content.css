@@ -138,6 +138,10 @@
   margin-bottom: 20px;
 }
 
+.xpath-input-container {
+  position: relative;
+}
+
 .xpath-label {
   display: block;
   font-weight: 600;
@@ -169,6 +173,81 @@
   margin-top: 8px;
   font-size: 12px;
   color: #a1a1aa;
+}
+
+/* Autocomplete */
+.xpath-autocomplete {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  max-height: 250px;
+  overflow-y: auto;
+  background: #2a2a2a;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+  margin-top: -8px;
+}
+
+.xpath-autocomplete::-webkit-scrollbar {
+  width: 6px;
+}
+
+.xpath-autocomplete::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.xpath-autocomplete::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+
+.xpath-autocomplete-item {
+  padding: 10px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  transition: all 0.2s;
+}
+
+.xpath-autocomplete-item.selected {
+  background: #0a84ff;
+}
+
+.xpath-autocomplete-item:hover {
+  background: #0a84ff;
+  opacity: 0.9;
+}
+
+.xpath-autocomplete-item:last-child {
+  border-bottom: none;
+}
+
+.xpath-autocomplete-label {
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+  color: #e4e4e7;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.xpath-autocomplete-item:hover .xpath-autocomplete-label,
+.xpath-autocomplete-item.selected .xpath-autocomplete-label {
+  color: #ffffff;
+}
+
+.xpath-autocomplete-desc {
+  font-size: 11px;
+  color: #a1a1aa;
+  line-height: 1.4;
+}
+
+.xpath-autocomplete-item:hover .xpath-autocomplete-desc,
+.xpath-autocomplete-item.selected .xpath-autocomplete-desc {
+  color: rgba(255, 255, 255, 0.8);
 }
 
 /* Results Section */
