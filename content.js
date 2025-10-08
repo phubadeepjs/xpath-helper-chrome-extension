@@ -396,6 +396,21 @@ function showPanel() {
 
   // Add global Esc key listener
   document.addEventListener("keydown", handlePanelEscKey);
+  
+  // Re-evaluate XPath if there's a query in the input
+  const xpathInput = document.getElementById("xpath-input");
+  if (xpathInput) {
+    if (xpathInput.value.trim()) {
+      evaluateXPath(xpathInput.value.trim());
+    }
+    
+    // Focus on input and move cursor to end
+    setTimeout(() => {
+      xpathInput.focus();
+      const length = xpathInput.value.length;
+      xpathInput.setSelectionRange(length, length);
+    }, 100);
+  }
 }
 
 function hidePanel() {
@@ -405,6 +420,12 @@ function hidePanel() {
   }
   isPanelVisible = false;
   stopElementPicker();
+  
+  // Remove all highlights when closing panel
+  removeAllHighlights();
+  
+  // Hide autocomplete
+  hideAutocomplete();
 
   // Remove global Esc key listener
   document.removeEventListener("keydown", handlePanelEscKey);

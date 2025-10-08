@@ -23,6 +23,7 @@
   backface-visibility: hidden;
   -webkit-font-smoothing: antialiased;
   color: #e4e4e7;
+  overflow: hidden;
 }
 
 #xpath-helper-panel.visible {
@@ -113,6 +114,7 @@
   overflow-y: auto;
   max-height: calc(80vh - 68px);
   background: #1e1e1e;
+  border-radius: 0 0 12px 12px;
 }
 
 .xpath-panel-content::-webkit-scrollbar {
