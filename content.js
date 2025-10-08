@@ -3,6 +3,8 @@ let isPickerActive = false;
 let hoveredElement = null;
 let searchTimeout = null;
 let autocompleteIndex = -1;
+let flashTimeouts = [];
+let flashedElements = [];
 
 // XPath autocomplete suggestions
 const xpathSuggestions = {
@@ -463,7 +465,10 @@ function startElementPicker() {
   document.addEventListener("mouseover", handleMouseOver, true);
   document.addEventListener("mouseout", handleMouseOut, true);
   document.addEventListener("click", handleClick, true);
-  document.body.style.cursor = "crosshair";
+  document.body.style.cursor = "crosshair !important";
+  
+  // Add visual indicator overlay
+  addPickerOverlay();
 }
 
 function stopElementPicker() {
@@ -471,12 +476,23 @@ function stopElementPicker() {
   document.removeEventListener("mouseover", handleMouseOver, true);
   document.removeEventListener("mouseout", handleMouseOut, true);
   document.removeEventListener("click", handleClick, true);
-  document.body.style.cursor = "default";
+  document.body.style.cursor = "";
 
   if (hoveredElement) {
     removeHighlight(hoveredElement);
     hoveredElement = null;
   }
+  
+  // Remove tooltip
+  hideElementTooltip();
+  
+  // Remove overlay
+  removePickerOverlay();
+  
+  // Clean up any remaining picker highlights
+  document.querySelectorAll('.xpath-picker-hover').forEach((el) => {
+    el.classList.remove("xpath-picker-hover");
+  });
 
   const pickerBtn = document.getElementById("xpath-toggle-picker");
   if (pickerBtn) {
@@ -484,6 +500,55 @@ function stopElementPicker() {
     pickerBtn.textContent = "🖱️";
   }
 }
+
+function addPickerOverlay() {
+  const overlay = document.createElement("div");
+  overlay.id = "xpath-picker-overlay";
+  overlay.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 2147483645;
+    pointer-events: none;
+    background: rgba(0, 0, 0, 0.02);
+  `;
+  document.body.appendChild(overlay);
+  
+  // Add instruction banner
+  const banner = document.createElement("div");
+  banner.id = "xpath-picker-banner";
+  banner.style.cssText = `
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #0a84ff;
+    color: white;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-family: -apple-system, sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    z-index: 2147483647;
+    pointer-events: none;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    animation: fadeIn 0.3s ease-out;
+  `;
+  banner.innerHTML = `
+    🖱️ Click on any element to select | Press <kbd style="background: rgba(255,255,255,0.2); padding: 2px 6px; border-radius: 3px;">Esc</kbd> to cancel
+  `;
+  document.body.appendChild(banner);
+}
+
+function removePickerOverlay() {
+  const overlay = document.getElementById("xpath-picker-overlay");
+  const banner = document.getElementById("xpath-picker-banner");
+  if (overlay) overlay.remove();
+  if (banner) banner.remove();
+}
+
 
 function handleMouseOver(event) {
   if (!isPickerActive) return;
@@ -509,155 +574,256 @@ function handleMouseOut(event) {
 
 function handleClick(event) {
   if (!isPickerActive) return;
+  
+  // Ignore clicks on picker UI elements
   if (event.target.closest("#xpath-helper-panel")) return;
+  if (event.target.id === "xpath-picker-overlay") return;
+  if (event.target.id === "xpath-picker-banner") return;
+  if (event.target.id === "xpath-picker-tooltip") return;
 
   event.preventDefault();
   event.stopPropagation();
 
-  const xpath = getXPath(event.target);
-  const xpathInput = document.getElementById("xpath-input");
-  if (xpathInput) {
-    xpathInput.value = xpath;
-    evaluateXPath(xpath);
+  // Clean up hovered element highlight first
+  if (hoveredElement) {
+    removeHighlight(hoveredElement);
+    hoveredElement = null;
   }
 
+  const xpath = getXPath(event.target);
+  
+  // Stop picker before evaluation (to clean up all picker highlights)
   stopElementPicker();
+  
+  // Update picker button state
+  const pickerBtn = document.getElementById("xpath-toggle-picker");
+  if (pickerBtn) {
+    pickerBtn.classList.remove("active");
+    pickerBtn.textContent = "🖱️";
+    pickerBtn.title = "Pick Element";
+  }
+  
+  // Then update input and evaluate
+  const xpathInput = document.getElementById("xpath-input");
+  if (xpathInput && xpath) {
+    xpathInput.value = xpath;
+    xpathInput.focus();
+    
+    // Small delay to ensure cleanup is complete
+    setTimeout(() => {
+      evaluateXPath(xpath);
+    }, 50);
+  }
 }
 
 function highlightElement(element) {
   if (element.id === "xpath-helper-panel") return;
-  element.setAttribute(
-    "data-xpath-original-outline",
-    element.style.outline || ""
-  );
-  element.setAttribute(
-    "data-xpath-original-bg",
-    element.style.backgroundColor || ""
-  );
-  element.style.outline = "3px solid #667eea";
-  element.style.backgroundColor = "rgba(102, 126, 234, 0.1)";
+  if (element.closest("#xpath-helper-panel")) return;
+  
+  // Use CSS class instead of inline styles for cleaner cleanup
+  element.classList.add("xpath-picker-hover");
+  
+  // Show element info tooltip
+  showElementTooltip(element);
 }
 
 function removeHighlight(element) {
-  const originalOutline = element.getAttribute("data-xpath-original-outline");
-  const originalBg = element.getAttribute("data-xpath-original-bg");
-  element.style.outline = originalOutline || "";
-  element.style.backgroundColor = originalBg || "";
-  element.removeAttribute("data-xpath-original-outline");
-  element.removeAttribute("data-xpath-original-bg");
+  if (!element) return;
+  
+  // Simply remove the class
+  element.classList.remove("xpath-picker-hover");
+  
+  // Remove tooltip
+  hideElementTooltip();
+}
+
+function showElementTooltip(element) {
+  // Remove existing tooltip
+  hideElementTooltip();
+  
+  const tooltip = document.createElement("div");
+  tooltip.id = "xpath-picker-tooltip";
+  tooltip.style.cssText = `
+    position: fixed;
+    background: #0a84ff;
+    color: white;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-family: 'SF Mono', monospace;
+    font-size: 12px;
+    font-weight: 600;
+    z-index: 2147483647;
+    pointer-events: none;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    white-space: nowrap;
+  `;
+  
+  const tagName = element.tagName.toLowerCase();
+  const className = element.className ? `.${element.className.split(' ')[0]}` : '';
+  const id = element.id ? `#${element.id}` : '';
+  
+  tooltip.textContent = `${tagName}${id}${className}`;
+  document.body.appendChild(tooltip);
+  
+  // Position tooltip
+  const rect = element.getBoundingClientRect();
+  tooltip.style.left = `${rect.left}px`;
+  tooltip.style.top = `${Math.max(rect.top - 35, 5)}px`;
+}
+
+function hideElementTooltip() {
+  const tooltip = document.getElementById("xpath-picker-tooltip");
+  if (tooltip) {
+    tooltip.remove();
+  }
 }
 
 function getXPath(element) {
-  // If element has unique id, use it
+  // Ignore picker elements
+  if (!element || element.closest("#xpath-helper-panel")) {
+    return "";
+  }
+
+  // Try multiple strategies and test which one works
+  const strategies = [
+    () => getXPathById(element),
+    () => getXPathByUniqueClass(element),
+    () => getXPathByAttributes(element),
+    () => getXPathByPosition(element)
+  ];
+
+  for (const strategy of strategies) {
+    const xpath = strategy();
+    if (xpath && testXPath(xpath, element)) {
+      return xpath;
+    }
+  }
+
+  // Fallback to position-based
+  return getXPathByPosition(element);
+}
+
+function getXPathById(element) {
   if (element.id) {
     return `//*[@id="${element.id}"]`;
   }
+  return null;
+}
 
+function getXPathByUniqueClass(element) {
+  if (!element.className || typeof element.className !== "string") {
+    return null;
+  }
+
+  const classes = element.className.trim().split(/\s+/)
+    .filter(c => c && !c.startsWith("xpath-helper"));
+  
+  if (classes.length === 0) return null;
+
+  const tagName = element.nodeName.toLowerCase();
+  
+  // Try with first class using contains
+  const firstClass = classes[0];
+  let xpath = `//${tagName}[contains(@class, "${firstClass}")]`;
+  
+  // If not unique, try with more specificity
+  if (!isXPathUnique(xpath, element)) {
+    // Try with exact class match
+    xpath = `//${tagName}[@class="${element.className}"]`;
+    
+    if (!isXPathUnique(xpath, element)) {
+      // Try with parent context
+      const parent = element.parentElement;
+      if (parent && parent.id) {
+        xpath = `//*[@id="${parent.id}"]//${tagName}[contains(@class, "${firstClass}")]`;
+      } else {
+        return null;
+      }
+    }
+  }
+  
+  return xpath;
+}
+
+function getXPathByAttributes(element) {
+  const tagName = element.nodeName.toLowerCase();
+  const usefulAttrs = ["name", "type", "value", "href", "src", "role", "data-testid", "aria-label", "placeholder"];
+  
+  for (const attr of usefulAttrs) {
+    if (element.hasAttribute(attr)) {
+      const attrValue = element.getAttribute(attr);
+      if (attrValue) {
+        const xpath = `//${tagName}[@${attr}="${attrValue}"]`;
+        if (isXPathUnique(xpath, element)) {
+          return xpath;
+        }
+      }
+    }
+  }
+  
+  return null;
+}
+
+function getXPathByPosition(element) {
   if (element === document.body) {
     return "//body";
   }
 
-  // Try to find a good anchor point (element with id) in the hierarchy
-  let anchor = null;
-  let anchorPath = "";
-  let temp = element.parentElement;
-
-  while (temp && temp !== document.body) {
-    if (temp.id) {
-      anchor = temp;
-      anchorPath = `//*[@id="${temp.id}"]`;
-      break;
-    }
-    temp = temp.parentElement;
-  }
-
-  // Build path from element to anchor (or body)
   const paths = [];
   let current = element;
 
-  while (current && current.nodeType === Node.ELEMENT_NODE) {
-    if (current === document.body || current === anchor) {
-      break;
-    }
-
+  while (current && current !== document.body) {
     const tagName = current.nodeName.toLowerCase();
-    let selector = tagName;
-    let hasAttribute = false;
-
-    // Add class attribute if exists
-    if (current.className && typeof current.className === "string") {
-      const classes = current.className
-        .trim()
-        .split(/\s+/)
-        .filter((c) => c && !c.startsWith("xpath-helper"));
-
-      if (classes.length > 0) {
-        // Use up to 3 classes
-        const classesToUse = classes.slice(0, 3).join(" ");
-        selector = `${tagName}[@class="${classesToUse}"]`;
-        hasAttribute = true;
-      }
-    }
-
-    // Try to add other useful attributes
-    if (!hasAttribute) {
-      const usefulAttrs = [
-        "id",
-        "name",
-        "type",
-        "role",
-        "data-testid",
-        "aria-label",
-      ];
-      for (const attr of usefulAttrs) {
-        if (current.hasAttribute(attr)) {
-          const attrValue = current.getAttribute(attr);
-          if (attrValue && attr !== "id") {
-            // id is handled separately
-            selector = `${tagName}[@${attr}="${attrValue}"]`;
-            hasAttribute = true;
-            break;
-          }
-        }
-      }
-    }
-
-    // Calculate position if needed
+    
+    // Get position among siblings with same tag
     const parent = current.parentNode;
-    if (parent) {
-      const siblings = Array.from(parent.children).filter((el) => {
-        // Match by tag name and class if selector has class
-        if (hasAttribute && current.className) {
-          return (
-            el.nodeName === current.nodeName &&
-            el.className === current.className
-          );
-        }
-        return el.nodeName === current.nodeName;
-      });
-
-      if (siblings.length > 1) {
-        const index = siblings.indexOf(current) + 1;
-        selector += `[${index}]`;
-      }
+    if (!parent) break;
+    
+    const siblings = Array.from(parent.children).filter(
+      el => el.nodeName === current.nodeName
+    );
+    
+    let selector = tagName;
+    if (siblings.length > 1) {
+      const index = siblings.indexOf(current) + 1;
+      selector = `${tagName}[${index}]`;
     }
-
+    
     paths.unshift(selector);
-    current = current.parentNode;
+    current = parent;
   }
 
-  // Build final XPath
-  if (paths.length === 0) {
-    return "//body";
-  }
-
-  if (anchorPath) {
-    // Use anchor point as base
-    return anchorPath + "/" + paths.join("/");
-  }
-
-  // Use relative path from body
   return "//" + paths.join("/");
+}
+
+function testXPath(xpath, expectedElement) {
+  try {
+    const result = document.evaluate(
+      xpath,
+      document,
+      null,
+      XPathResult.FIRST_ORDERED_NODE_TYPE,
+      null
+    );
+    return result.singleNodeValue === expectedElement;
+  } catch (e) {
+    return false;
+  }
+}
+
+function isXPathUnique(xpath, expectedElement) {
+  try {
+    const result = document.evaluate(
+      xpath,
+      document,
+      null,
+      XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+      null
+    );
+    return result.snapshotLength === 1 && result.snapshotItem(0) === expectedElement;
+  } catch (e) {
+    return false;
+  }
 }
 
 // XPath Evaluation
@@ -765,11 +931,26 @@ function scrollToElement(element) {
 
   element.style.outline = "4px solid #ff9800";
   element.style.backgroundColor = "rgba(255, 152, 0, 0.3)";
+  
+  // Store element and original styles
+  element.setAttribute('data-flash-outline', originalOutline || '');
+  element.setAttribute('data-flash-bg', originalBg || '');
+  flashedElements.push(element);
 
-  setTimeout(() => {
+  const timeoutId = setTimeout(() => {
     element.style.outline = originalOutline;
     element.style.backgroundColor = originalBg;
+    element.removeAttribute('data-flash-outline');
+    element.removeAttribute('data-flash-bg');
+    
+    // Remove from flashedElements array
+    const index = flashedElements.indexOf(element);
+    if (index > -1) {
+      flashedElements.splice(index, 1);
+    }
   }, 1000);
+  
+  flashTimeouts.push(timeoutId);
 }
 
 function attachResultClickHandlers(result, maxResults) {
@@ -874,10 +1055,37 @@ function showError(message) {
 }
 
 function removeAllHighlights() {
-  const highlighted = document.querySelectorAll(".xpath-helper-highlight");
+  // Remove both highlight classes
+  const highlighted = document.querySelectorAll(".xpath-helper-highlight, .xpath-picker-hover");
   highlighted.forEach((el) => {
     el.classList.remove("xpath-helper-highlight");
+    el.classList.remove("xpath-picker-hover");
   });
+  
+  // Clear all flash animations
+  clearFlashAnimations();
+}
+
+function clearFlashAnimations() {
+  // Cancel all pending flash timeouts
+  flashTimeouts.forEach(timeoutId => clearTimeout(timeoutId));
+  flashTimeouts = [];
+  
+  // Restore all flashed elements immediately
+  flashedElements.forEach(element => {
+    const originalOutline = element.getAttribute('data-flash-outline');
+    const originalBg = element.getAttribute('data-flash-bg');
+    
+    if (originalOutline !== null) {
+      element.style.outline = originalOutline || '';
+      element.removeAttribute('data-flash-outline');
+    }
+    if (originalBg !== null) {
+      element.style.backgroundColor = originalBg || '';
+      element.removeAttribute('data-flash-bg');
+    }
+  });
+  flashedElements = [];
 }
 
 // Check if extension context is valid
@@ -959,6 +1167,13 @@ if (!isExtensionContextValid()) {
     "XPath Helper: Extension context is invalid. Page refresh required."
   );
 }
+
+// Cleanup on page unload
+window.addEventListener("beforeunload", () => {
+  removeAllHighlights();
+  stopElementPicker();
+  hidePanel();
+});
 
 // Auto-open panel on first install (optional)
 // showPanel();
